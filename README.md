@@ -35,4 +35,5 @@ The shell scripts in this repo are to be used on a fresh install of Fedora Linux
     6. Then, add a panel, left center aligned, fit content.  Add icons to thunderbird, keepassxc, obsidian
 4. Set Kwrite as the default text editor with new document to open every time it is opened
 5. Enable third party repositories
-6. Set fish as the default shell
+6. Set Fedora Light or Fedora Dark theme based on time
+7. Set fish as the default shell
