@@ -10,7 +10,6 @@ The shell scripts in this repo are to be used on a fresh install of Fedora Linux
     3. keepassXC (set it to start with system startup)
     6. brave browser (with keepassXC extension)
     7. Add Keepass XC extension to firefox
-    8. Add ‘Anonymous story viewer’ extension to firefox
     9. Onlyoffice Desktop Editors
     10. Obsidian
     11. Librewolf browser (make it ephemeral)
