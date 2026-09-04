@@ -2,9 +2,37 @@
 
 The shell scripts in this repo are to be used on a fresh install of Fedora Linux.  They were written for Fedora 44, but can be used for newer versions too.
 
-### It sets up the following according to my preferences:
-1. Updating the system
-2. Set up desktop panels according to my preferences
-3. Install software that I regularly use
-
-It contains setups for both the KDE Plasma DE as well as GNOME.
+### On KDE Plasma workstation, it:
+1. Update/upgrade the OS  
+2. Install the following using dnf as much as possible(don’t use flatpak or others):  
+  3. git  
+  4. thunderbird  
+  5. keepassXC (set it to start with system startup)  
+  6. brave browser (with keepassXC extension)  
+  7. Add Keepass XC extension to firefox  
+  8. Add ‘Anonymous story viewer’ extension to firefox  
+  9. Onlyoffice Desktop Editors  
+  10. Obsidian  
+  11. Librewolf browser (make it ephemeral)  
+  12. Nautilus file manager (make default)  
+  13. Eye of gnome  
+  14. Visual studio code  
+  15. megasync  
+  16. telegram  
+  17. tor  
+  18. haruna  
+  19. bleachbit  
+  20. czkawka  
+  21. virtual machine manager  
+  22. fish  
+  23. Remove libreoffice  
+3. Change the desktop  
+  22. Remove all panels and widgets  
+  23. Then, add a panel, bottom center aligned, fit content.  Add the KDE launcher button followed by the task manager  
+  24. Then, add a panel, top center aligned, fit content.  Add system tray and clock.  
+    25. On the clock widget, remove the date from the clock and add a timezone for India.  Default should still be UK.  
+    26. Add a system monitor widget  
+  25. Then, add a panel, left center aligned, fit content.  Add icons to thunderbird, keepassxc, obsidian  
+4. Set Kwrite as the default text editor with new document to open every time it is opened  
+5. Enable third party repositories  
+6. Set fish as the default shell  
