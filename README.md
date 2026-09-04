@@ -3,7 +3,7 @@
 The shell scripts in this repo are to be used on a fresh install of Fedora Linux.They were written for Fedora 44, but can be used for newer versions too.
 
 ### On KDE Plasma workstation, it will:
-1. Ugrade the OS
+1. Upgrade the OS
 2. Install the following using dnf as much as possible(don’t use flatpak or others):
     1. git
     2. thunderbird
