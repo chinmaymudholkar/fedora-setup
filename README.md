@@ -14,7 +14,6 @@ The shell scripts in this repo are to be used on a fresh install of Fedora Linux
     - Add Keepass XC extension to firefox
     - Onlyoffice Desktop Editors
     - Obsidian (Notes)
-    - Librewolf browser (make it ephemeral)
     - Nautilus file manager (make it the default file manager)
     - Eye of gnome (make it the default image viewer)
     - Visual Studio Code
@@ -36,5 +35,5 @@ The shell scripts in this repo are to be used on a fresh install of Fedora Linux
     5. Then, add a panel, left center aligned, fit content.  Add icons to thunderbird, keepassxc, obsidian
 1. Set Kwrite as the default text editor with new document to open every time it is opened
 1. Security harden Firefox
-1. Set Fedora Light or Fedora Dark theme based on time
+1. Remove Copr for google-chrome and PyCharm
 1. Set fish as the default shell
