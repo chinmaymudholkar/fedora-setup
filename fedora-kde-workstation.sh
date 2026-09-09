@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # ==============================================================================
-# Fedora 44 (KDE Plasma 6) Automated Setup Script - Auto-Theme & Panel Tweaks
+# Fedora 44 (KDE Plasma 6) Automated Setup Script - Klassy Light & Secure Setup
 # ==============================================================================
 set -euo pipefail
 
@@ -32,7 +32,7 @@ trap 'failure_handler ${LINENO}' ERR
 log_info "Starting Fedora setup script..."
 
 # --- 1. Secure Private DNS (DNS-over-TLS) Setup & Verification ---
-log_info "1/12: Configuring Secure Private DNS (Systemd-Resolved DoT)..."
+log_info "1/10: Configuring Secure Private DNS (Systemd-Resolved DoT)..."
 
 sudo systemctl enable --now systemd-resolved
 
@@ -46,7 +46,6 @@ DNSOverTLS=yes
 DNSSEC=allow-downgrade
 EOF
 
-# Restart systemd-resolved to apply configuration
 sudo systemctl restart systemd-resolved
 
 # Instruct NetworkManager to hand off DNS resolving to systemd-resolved
@@ -58,7 +57,6 @@ EOF
 
 sudo systemctl restart NetworkManager
 
-# Verification
 log_info "Verifying Secure DNS configuration..."
 sleep 2
 if resolvectl status | grep -E "DNS Server|DNS-over-TLS" > /dev/null; then
@@ -75,18 +73,32 @@ else
 fi
 
 
-# --- 2. System Update ---
-log_info "2/12: Updating system packages..."
-sudo dnf upgrade -y
+# --- 2. Remove Unwanted Third-Party Repositories & Packages ---
+log_info "2/10: Removing Google Chrome & PyCharm (phracek COPR) repositories..."
 
-# --- 3. Enable Repositories ---
-log_info "3/12: Setting up package repositories..."
+# Disable & remove phracek's PyCharm COPR repository
+sudo dnf copr disable -y phracek/PyCharm 2>/dev/null || true
+sudo rm -f /etc/yum.repos.d/_copr:copr.fedorainfracloud.org:phracek:PyCharm.repo \
+           /etc/yum.repos.d/copr:copr.fedorainfracloud.org:phracek:PyCharm.repo
+
+# Disable & remove Fedora Google Chrome repository
+sudo dnf config-manager --set-disabled google-chrome 2>/dev/null || true
+sudo rm -f /etc/yum.repos.d/google-chrome.repo /etc/yum.repos.d/google-chrome*.repo
+
+# Remove installed packages if present
+sudo dnf remove -y google-chrome-stable pycharm-community pycharm-professional 2>/dev/null || true
+
+# Force DNF cache purge so removed repos disappear from upgrade lists immediately
+sudo dnf clean metadata
+
+
+# --- 3. System Update & Repository Setup ---
+log_info "3/10: Setting up repositories and updating system..."
 sudo dnf install -y dnf-plugins-core fedora-workstation-repositories curl wget
 
-# COPR Repositories (Klassy & LibreWolf)
-log_info "Enabling COPR repositories..."
-sudo dnf copr enable -y paulwon/klassy || log_warn "Failed to enable Klassy COPR repo."
-sudo dnf copr enable -y bgstack15/librewolf || log_warn "Failed to enable LibreWolf COPR repo."
+# Active Klassy COPR Repositories
+log_info "Enabling Klassy COPR repositories..."
+sudo dnf copr enable -y errornointernet/klassy || sudo dnf copr enable -y major-tom/klassy || log_warn "Failed to enable Klassy COPR repo."
 
 # RPM Fusion Repositories
 log_info "Enabling RPM Fusion..."
@@ -114,12 +126,14 @@ EOF
 log_info "Adding OnlyOffice repo..."
 sudo dnf install -y https://download.onlyoffice.com/repo/centos/main/noarch/onlyoffice-repo.noarch.rpm || log_warn "Failed OnlyOffice Repo installation."
 
-# Refresh metadata cleanly
-log_info "Rebuilding DNF cache..."
+# Refresh metadata cleanly and upgrade
+log_info "Rebuilding DNF cache and upgrading system..."
 sudo dnf makecache
+sudo dnf upgrade -y
 
-# --- 4. DNF Package Installation (Includes Klassy) ---
-log_info "4/12: Installing packages via DNF..."
+
+# --- 4. DNF Package Installation ---
+log_info "4/10: Installing packages via DNF..."
 PACKAGES=(
   git
   thunderbird
@@ -127,7 +141,6 @@ PACKAGES=(
   keepassxc
   brave-browser
   onlyoffice-desktopeditors
-  librewolf
   nautilus
   eog
   code
@@ -139,10 +152,29 @@ PACKAGES=(
   fish
   kwrite
   qt6-qttools
-  klassy
 )
 
 sudo dnf install -y "${PACKAGES[@]}"
+
+# Attempt Klassy package install via DNF or build from source fallback
+log_info "Installing Klassy..."
+if ! sudo dnf install -y klassy; then
+    log_warn "RPM package for Klassy not found in COPR. Building from official source..."
+    
+    # Install build dependencies
+    sudo dnf install -y git cmake extra-cmake-modules gettext gcc-c++ \
+        "cmake(KF6Config)" "cmake(KF6CoreAddons)" "cmake(KF6ColorScheme)" \
+        "cmake(KF6I18n)" "cmake(KF6IconThemes)" "cmake(KF6KCMUtils)" \
+        "cmake(KF6GuiAddons)" "cmake(KF6WindowSystem)" "cmake(KDecoration3)"
+    
+    BUILD_DIR=$(mktemp -d)
+    git clone https://github.com/paulmcauley/klassy.git "$BUILD_DIR"
+    cd "$BUILD_DIR"
+    ./install.sh || log_warn "Klassy compilation failed."
+    cd ~
+    rm -rf "$BUILD_DIR"
+fi
+
 
 # --- Standalone Applications (Direct Installation) ---
 
@@ -190,28 +222,40 @@ Terminal=false
 Categories=System;Utility;
 EOF
 
-# --- 5. Install & Configure Klassy Theme ---
-log_info "5/12: Applying Klassy Window Decoration..."
+
+# --- 5. Configure Klassy Light Theme & Window Decorations ---
+log_info "5/10: Applying Klassy Light Global Theme & Window Decorations..."
 
 QDBUS_CMD=""
 if command -v qdbus-qt6 &>/dev/null; then QDBUS_CMD="qdbus-qt6";
 elif command -v qdbus6 &>/dev/null; then QDBUS_CMD="qdbus6";
 elif command -v qdbus &>/dev/null; then QDBUS_CMD="qdbus"; fi
 
+# Explicitly configure KDE Globals & KWin for Klassy + Breeze Light scheme
 if command -v kwriteconfig6 &>/dev/null; then
+    # Set Window Decoration to Klassy
     kwriteconfig6 --file kwinrc --group org.kde.kdecoration2 --key theme "org.kde.klassy"
     kwriteconfig6 --file kwinrc --group org.kde.kdecoration2 --key library "org.kde.klassy"
+
+    # Set Widget Style to Klassy
+    kwriteconfig6 --file kdeglobals --group KDE --key widgetStyle "klassy"
+
+    # Set Color Scheme to Light (BreezeLight)
+    kwriteconfig6 --file kdeglobals --group General --key ColorScheme "BreezeLight"
     
+    # Reload live settings if qdbus is available
     if [ -n "$QDBUS_CMD" ]; then
-        $QDBUS_CMD org.kde.KWin /KWin reconfigure || log_warn "KWin reconfigure command failed."
+        $QDBUS_CMD org.kde.KWin /KWin reconfigure || true
+        $QDBUS_CMD org.kde.KControl /KControl reconfigure || true
     fi
-    log_success "Klassy window decoration applied."
+    log_success "Klassy application style and window decorations configured."
 else
-    log_warn "kwriteconfig6 not found. Please set Klassy manually in System Settings."
+    log_warn "kwriteconfig6 not found."
 fi
 
+
 # --- 6. Security Harden Firefox ---
-log_info "6/12: Security Hardening Firefox..."
+log_info "6/10: Security Hardening Firefox..."
 
 FIREFOX_DIR="${HOME}/.mozilla/firefox"
 
@@ -270,12 +314,14 @@ else
     log_warn "Could not auto-detect Firefox profile directory. Please open Firefox once and rerun the script."
 fi
 
+
 # --- 7. Remove LibreOffice ---
-log_info "7/12: Removing LibreOffice..."
-sudo dnf remove -y "libre*" || log_warn "LibreOffice not found."
+log_info "7/10: Removing LibreOffice..."
+sudo dnf remove -y "libreoffice*" || log_warn "LibreOffice not found."
+
 
 # --- 8. Application Defaults & Configuration ---
-log_info "8/12: Setting default application handlers..."
+log_info "8/10: Setting default application handlers..."
 
 # Default file manager
 xdg-mime default org.gnome.Nautilus.desktop inode/directory
@@ -301,14 +347,6 @@ elif [ -f /usr/share/applications/keepassxc.desktop ]; then
     cp /usr/share/applications/keepassxc.desktop ~/.config/autostart/
 fi
 
-# LibreWolf Ephemeral Mode
-mkdir -p ~/.local/share/applications
-if [ -f /usr/share/applications/io.gitlab.librewolf-community.desktop ]; then
-    sed 's/Exec=librewolf %u/Exec=librewolf --private-window %u/g' /usr/share/applications/io.gitlab.librewolf-community.desktop > ~/.local/share/applications/io.gitlab.librewolf-community.desktop
-elif [ -f /usr/share/applications/librewolf.desktop ]; then
-    sed 's/Exec=librewolf %u/Exec=librewolf --private-window %u/g' /usr/share/applications/librewolf.desktop > ~/.local/share/applications/librewolf.desktop
-fi
-
 # Default Shell to Fish
 CURRENT_USER=$(whoami)
 FISH_PATH=$(which fish 2>/dev/null || echo "")
@@ -316,16 +354,9 @@ if [ -n "$FISH_PATH" ]; then
     sudo chsh -s "$FISH_PATH" "$CURRENT_USER"
 fi
 
-# --- 9. Browser Extensions Reference ---
-log_info "9/12: Writing extension instructions..."
-mkdir -p ~/.config/browser-extensions-setup
-cat << 'EOF' > ~/.config/browser-extensions-setup/urls.txt
-KeePassXC Extension: https://addons.mozilla.org/en-US/firefox/addon/keepassxc-browser/
-Anonymous Story Viewer: https://addons.mozilla.org/en-US/firefox/addon/anonymous-story-viewer/
-EOF
 
-# --- 10. KDE Plasma 6 Desktop Panels ---
-log_info "10/12: Applying KDE Plasma 6 Desktop Panels..."
+# --- 9. KDE Plasma 6 Desktop Panels ---
+log_info "9/10: Applying KDE Plasma 6 Desktop Panels..."
 
 JS_SCRIPT="/tmp/reset_panels.js"
 cat << 'EOF' > "$JS_SCRIPT"
@@ -382,62 +413,9 @@ fi
 
 rm -f "$JS_SCRIPT"
 
-# --- 11. Automatic Light/Dark Theme Switching ---
-log_info "11/12: Setting up Automatic Light/Dark Theme switching..."
 
-mkdir -p ~/.local/bin ~/.config/systemd/user
-
-cat << 'EOF' > ~/.local/bin/plasma-auto-theme.sh
-#!/usr/bin/env bash
-HOUR=$(date +%H)
-
-THEME_TOOL=""
-if command -v plasma-apply-lookandfeel &>/dev/null; then
-    THEME_TOOL="plasma-apply-lookandfeel -a"
-elif command -v lookandfeeltool &>/dev/null; then
-    THEME_TOOL="lookandfeeltool -a"
-fi
-
-if [ -z "$THEME_TOOL" ]; then
-    exit 0
-fi
-
-if [ "$HOUR" -ge 7 ] && [ "$HOUR" -lt 19 ]; then
-    $THEME_TOOL org.kde.breezedark.desktop &>/dev/null || $THEME_TOOL org.kde.breeze.desktop
-else
-    $THEME_TOOL org.kde.breezedark.desktop
-fi
-EOF
-chmod +x ~/.local/bin/plasma-auto-theme.sh
-
-cat << 'EOF' > ~/.config/systemd/user/plasma-auto-theme.service
-[Unit]
-Description=KDE Plasma Automatic Theme Switcher
-
-[Service]
-Type=oneshot
-ExecStart=/home/%u/.local/bin/plasma-auto-theme.sh
-EOF
-
-cat << 'EOF' > ~/.config/systemd/user/plasma-auto-theme.timer
-[Unit]
-Description=Run KDE Plasma Auto Theme Switcher hourly
-
-[Timer]
-OnCalendar=*-*-* *:00:00
-OnBootSec=1min
-Persistent=true
-
-[Install]
-WantedBy=timers.target
-EOF
-
-systemctl --user daemon-reload
-systemctl --user enable --now plasma-auto-theme.timer
-~/.local/bin/plasma-auto-theme.sh || log_warn "Could not evaluate immediate theme application."
-
-# --- 12. Final Cleanup ---
-log_info "12/12: Finalizing configuration..."
+# --- 10. Final Cleanup ---
+log_info "10/10: Finalizing configuration..."
 
 log_success "=== Setup process completed! ==="
 log_info "Please log out and log back in to finalize changes."
