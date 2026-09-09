@@ -31,13 +31,62 @@ trap 'failure_handler ${LINENO}' ERR
 
 log_info "Starting Fedora setup script..."
 
-# --- 1. System Update ---
-log_info "1/9: Updating system packages..."
+# --- 1. Secure Private DNS (DNS-over-TLS) Setup & Verification ---
+log_info "1/12: Configuring Secure Private DNS (Systemd-Resolved DoT)..."
+
+sudo systemctl enable --now systemd-resolved
+
+# Configure systemd-resolved for DNS-over-TLS using Cloudflare & Quad9
+sudo mkdir -p /etc/systemd/resolved.conf.d/
+cat << 'EOF' | sudo tee /etc/systemd/resolved.conf.d/privacy-dns.conf > /dev/null
+[Resolve]
+DNS=1.1.1.1#one.one.one.one 9.9.9.9#dns.quad9.net
+FallbackDNS=1.0.0.1#one.one.one.one 149.112.112.112#dns.quad9.net
+DNSOverTLS=yes
+DNSSEC=allow-downgrade
+EOF
+
+# Restart systemd-resolved to apply configuration
+sudo systemctl restart systemd-resolved
+
+# Instruct NetworkManager to hand off DNS resolving to systemd-resolved
+sudo mkdir -p /etc/NetworkManager/conf.d/
+cat << 'EOF' | sudo tee /etc/NetworkManager/conf.d/10-dns-resolved.conf > /dev/null
+[main]
+dns=systemd-resolved
+EOF
+
+sudo systemctl restart NetworkManager
+
+# Verification
+log_info "Verifying Secure DNS configuration..."
+sleep 2
+if resolvectl status | grep -E "DNS Server|DNS-over-TLS" > /dev/null; then
+    log_success "DNS-over-TLS enabled on systemd-resolved."
+else
+    log_warn "Failed to verify DoT status via resolvectl."
+fi
+
+log_info "Testing DNS query resolution..."
+if resolvectl query cloudflare.com > /dev/null; then
+    log_success "DNS query verified successfully."
+else
+    log_warn "DNS query test failed."
+fi
+
+
+# --- 2. System Update ---
+log_info "2/12: Updating system packages..."
 sudo dnf upgrade -y
 
-# --- 2. Enable Repositories ---
-log_info "2/9: Setting up package repositories..."
+# --- 3. Enable Repositories ---
+log_info "3/12: Setting up package repositories..."
 sudo dnf install -y dnf-plugins-core fedora-workstation-repositories curl wget
+
+# COPR Repositories (Klassy & LibreWolf)
+log_info "Enabling COPR repositories..."
+sudo dnf copr enable -y paulwon/klassy || log_warn "Failed to enable Klassy COPR repo."
+sudo dnf copr enable -y bgstack15/librewolf || log_warn "Failed to enable LibreWolf COPR repo."
 
 # RPM Fusion Repositories
 log_info "Enabling RPM Fusion..."
@@ -61,10 +110,6 @@ gpgcheck=1
 gpgkey=https://packages.microsoft.com/keys/microsoft.asc
 EOF
 
-# LibreWolf Repo via COPR
-log_info "Enabling LibreWolf COPR..."
-sudo dnf copr enable -y bgstack15/librewolf || log_warn "Failed LibreWolf COPR."
-
 # OnlyOffice Repo setup
 log_info "Adding OnlyOffice repo..."
 sudo dnf install -y https://download.onlyoffice.com/repo/centos/main/noarch/onlyoffice-repo.noarch.rpm || log_warn "Failed OnlyOffice Repo installation."
@@ -73,11 +118,12 @@ sudo dnf install -y https://download.onlyoffice.com/repo/centos/main/noarch/only
 log_info "Rebuilding DNF cache..."
 sudo dnf makecache
 
-# --- 3. DNF Package Installation ---
-log_info "3/9: Installing packages via DNF..."
+# --- 4. DNF Package Installation (Includes Klassy) ---
+log_info "4/12: Installing packages via DNF..."
 PACKAGES=(
   git
   thunderbird
+  firefox
   keepassxc
   brave-browser
   onlyoffice-desktopeditors
@@ -93,6 +139,7 @@ PACKAGES=(
   fish
   kwrite
   qt6-qttools
+  klassy
 )
 
 sudo dnf install -y "${PACKAGES[@]}"
@@ -143,12 +190,92 @@ Terminal=false
 Categories=System;Utility;
 EOF
 
-# --- 4. Remove LibreOffice ---
-log_info "4/9: Removing LibreOffice..."
-sudo dnf remove -y "libreoffice*" || log_warn "LibreOffice not found."
+# --- 5. Install & Configure Klassy Theme ---
+log_info "5/12: Applying Klassy Window Decoration..."
 
-# --- 5. Application Defaults & Configuration ---
-log_info "5/9: Setting default application handlers..."
+QDBUS_CMD=""
+if command -v qdbus-qt6 &>/dev/null; then QDBUS_CMD="qdbus-qt6";
+elif command -v qdbus6 &>/dev/null; then QDBUS_CMD="qdbus6";
+elif command -v qdbus &>/dev/null; then QDBUS_CMD="qdbus"; fi
+
+if command -v kwriteconfig6 &>/dev/null; then
+    kwriteconfig6 --file kwinrc --group org.kde.kdecoration2 --key theme "org.kde.klassy"
+    kwriteconfig6 --file kwinrc --group org.kde.kdecoration2 --key library "org.kde.klassy"
+    
+    if [ -n "$QDBUS_CMD" ]; then
+        $QDBUS_CMD org.kde.KWin /KWin reconfigure || log_warn "KWin reconfigure command failed."
+    fi
+    log_success "Klassy window decoration applied."
+else
+    log_warn "kwriteconfig6 not found. Please set Klassy manually in System Settings."
+fi
+
+# --- 6. Security Harden Firefox ---
+log_info "6/12: Security Hardening Firefox..."
+
+FIREFOX_DIR="${HOME}/.mozilla/firefox"
+
+if [ ! -d "$FIREFOX_DIR" ]; then
+    log_info "Initializing Firefox profile directory..."
+    timeout 5 firefox --headless || true
+    sleep 2
+fi
+
+PROFILE_DIR=$(find "$FIREFOX_DIR" -maxdepth 1 -type d -name "*.default-release" | head -n 1 || true)
+if [ -z "$PROFILE_DIR" ]; then
+    PROFILE_DIR=$(find "$FIREFOX_DIR" -maxdepth 1 -type d -name "*.default" | head -n 1 || true)
+fi
+
+if [ -n "$PROFILE_DIR" ] && [ -d "$PROFILE_DIR" ]; then
+    log_info "Applying security preferences to profile: ${PROFILE_DIR}"
+    
+    cat << 'EOF' > "${PROFILE_DIR}/user.js"
+// --- FIREFOX SECURITY & PRIVACY HARDENING ---
+
+// Privacy & Tracking Protection
+user_pref("privacy.firstparty.isolate", true);
+user_pref("privacy.trackingprotection.enabled", true);
+user_pref("privacy.trackingprotection.socialtracking.enabled", true);
+user_pref("privacy.trackingprotection.cryptomining.enabled", true);
+user_pref("privacy.trackingprotection.fingerprinting.enabled", true);
+
+// HTTPS-Only Mode
+user_pref("dom.security.https_only_mode", true);
+user_pref("dom.security.https_only_mode_ever_enabled", true);
+
+// DNS-over-HTTPS (Cloudflare / Max Security Fallback)
+user_pref("network.trr.mode", 2);
+user_pref("network.trr.uri", "https://mozilla.cloudflare-dns.com/dns-query");
+
+// Disable Telemetry & Studies
+user_pref("toolkit.telemetry.enabled", false);
+user_pref("toolkit.telemetry.unified", false);
+user_pref("experiments.supported", false);
+user_pref("experiments.enabled", false);
+user_pref("experiments.manifest.uri", "");
+user_pref("datareporting.healthreport.uploadEnabled", false);
+
+// Disable Unnecessary Permissions & Autoplay
+user_pref("media.autoplay.default", 5);
+user_pref("geo.enabled", false);
+
+// Network Hardening
+user_pref("network.prefetch-next", false);
+user_pref("network.dns.disablePrefetch", true);
+user_pref("network.predictor.enabled", false);
+EOF
+
+    log_success "Firefox user.js hardened successfully."
+else
+    log_warn "Could not auto-detect Firefox profile directory. Please open Firefox once and rerun the script."
+fi
+
+# --- 7. Remove LibreOffice ---
+log_info "7/12: Removing LibreOffice..."
+sudo dnf remove -y "libre*" || log_warn "LibreOffice not found."
+
+# --- 8. Application Defaults & Configuration ---
+log_info "8/12: Setting default application handlers..."
 
 # Default file manager
 xdg-mime default org.gnome.Nautilus.desktop inode/directory
@@ -189,26 +316,16 @@ if [ -n "$FISH_PATH" ]; then
     sudo chsh -s "$FISH_PATH" "$CURRENT_USER"
 fi
 
-# --- 6. Browser Extensions Reference ---
-log_info "6/9: Writing extension instructions..."
+# --- 9. Browser Extensions Reference ---
+log_info "9/12: Writing extension instructions..."
 mkdir -p ~/.config/browser-extensions-setup
 cat << 'EOF' > ~/.config/browser-extensions-setup/urls.txt
 KeePassXC Extension: https://addons.mozilla.org/en-US/firefox/addon/keepassxc-browser/
 Anonymous Story Viewer: https://addons.mozilla.org/en-US/firefox/addon/anonymous-story-viewer/
 EOF
 
-# --- 7. KDE Plasma 6 Desktop Panels ---
-log_info "7/9: Applying KDE Plasma 6 Desktop Panels..."
-
-# Resolve available DBus executable
-QDBUS_CMD=""
-if command -v qdbus-qt6 &>/dev/null; then
-    QDBUS_CMD="qdbus-qt6"
-elif command -v qdbus6 &>/dev/null; then
-    QDBUS_CMD="qdbus6"
-elif command -v qdbus &>/dev/null; then
-    QDBUS_CMD="qdbus"
-fi
+# --- 10. KDE Plasma 6 Desktop Panels ---
+log_info "10/12: Applying KDE Plasma 6 Desktop Panels..."
 
 JS_SCRIPT="/tmp/reset_panels.js"
 cat << 'EOF' > "$JS_SCRIPT"
@@ -265,17 +382,15 @@ fi
 
 rm -f "$JS_SCRIPT"
 
-# --- 8. Automatic Light/Dark Theme Switching ---
-log_info "8/9: Setting up Automatic Light/Dark Theme switching..."
+# --- 11. Automatic Light/Dark Theme Switching ---
+log_info "11/12: Setting up Automatic Light/Dark Theme switching..."
 
-# Script to switch theme based on time
 mkdir -p ~/.local/bin ~/.config/systemd/user
 
 cat << 'EOF' > ~/.local/bin/plasma-auto-theme.sh
 #!/usr/bin/env bash
 HOUR=$(date +%H)
 
-# Choose tool
 THEME_TOOL=""
 if command -v plasma-apply-lookandfeel &>/dev/null; then
     THEME_TOOL="plasma-apply-lookandfeel -a"
@@ -287,7 +402,6 @@ if [ -z "$THEME_TOOL" ]; then
     exit 0
 fi
 
-# Apply Breeze (Light) between 07:00 and 18:59, Breeze Dark otherwise
 if [ "$HOUR" -ge 7 ] && [ "$HOUR" -lt 19 ]; then
     $THEME_TOOL org.kde.breezedark.desktop &>/dev/null || $THEME_TOOL org.kde.breeze.desktop
 else
@@ -296,7 +410,6 @@ fi
 EOF
 chmod +x ~/.local/bin/plasma-auto-theme.sh
 
-# Create Systemd User Service
 cat << 'EOF' > ~/.config/systemd/user/plasma-auto-theme.service
 [Unit]
 Description=KDE Plasma Automatic Theme Switcher
@@ -306,7 +419,6 @@ Type=oneshot
 ExecStart=/home/%u/.local/bin/plasma-auto-theme.sh
 EOF
 
-# Create Systemd User Timer (runs hourly and on login)
 cat << 'EOF' > ~/.config/systemd/user/plasma-auto-theme.timer
 [Unit]
 Description=Run KDE Plasma Auto Theme Switcher hourly
@@ -320,13 +432,12 @@ Persistent=true
 WantedBy=timers.target
 EOF
 
-# Enable and start user timer
 systemctl --user daemon-reload
 systemctl --user enable --now plasma-auto-theme.timer
 ~/.local/bin/plasma-auto-theme.sh || log_warn "Could not evaluate immediate theme application."
 
-# --- 9. Final Cleanup ---
-log_info "9/9: Finalizing configuration..."
+# --- 12. Final Cleanup ---
+log_info "12/12: Finalizing configuration..."
 
 log_success "=== Setup process completed! ==="
 log_info "Please log out and log back in to finalize changes."
